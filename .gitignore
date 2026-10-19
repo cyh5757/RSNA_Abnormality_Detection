@@ -1,0 +1,40 @@
+data/
+outputs/
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.env
+.env.*
+kaggle.json
+access_token
+
+# Local agent state, editor settings and credentials
+.superpowers/
+.codex/
+.agents/
+.aws/
+.kaggle/
+.vscode/
+*.pem
+*.key
+
+# MRI data, checkpoints and downloadable runtime assets
+*.dcm
+*.pt
+*.pth
+*.ckpt
+encoder.ts
+*.onnx
+*.whl
+*.zip
+*.tar
+*.gz
+*.7z
+
+# Local caches and logs
+.pytest_cache/
+.ruff_cache/
+*.log
+.coverage
+Thumbs.db
+.DS_Store

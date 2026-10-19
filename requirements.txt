@@ -1,0 +1,13 @@
+# Direct dependencies; versions are not locked to the Kaggle runtime.
+numpy
+pandas
+torch
+torchvision
+scikit-learn
+pydicom
+python-gdcm
+tqdm
+
+# VS Code notebook kernel and Kaggle upload/download commands.
+ipykernel
+kaggle

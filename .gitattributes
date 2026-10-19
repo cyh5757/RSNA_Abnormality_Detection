@@ -1,0 +1,6 @@
+# Experiment configurations hash raw source bytes. Preserve their exact line endings.
+* -text
+
+# These notebooks embed generated copies of the Python experiment modules.
+notebooks/** linguist-generated=true
+notebooks/public_journal/** linguist-generated=false

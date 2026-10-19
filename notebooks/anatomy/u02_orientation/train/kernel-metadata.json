@@ -1,0 +1,20 @@
+{
+  "id": "choiyoungwhan/rsna-knee-u02-orientation-train",
+  "title": "RSNA Knee u02_orientation train",
+  "code_file": "train.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": [
+    "rsna-knee-abnormality-detection"
+  ],
+  "dataset_sources": [
+    "pilkwang/rsna-knee-llm-labels"
+  ],
+  "kernel_sources": [
+    "choiyoungwhan/rsna-knee-u01-mm-crop-train/1"
+  ],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:2757e0c7d1e0a9cb43da657b97e223c321a98f5014bdf64f44f2f6b083ad2b2f"
+}

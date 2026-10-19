@@ -1,0 +1,13 @@
+{
+  "id": "choiyoungwhan/rsna-knee-first-gpu-training",
+  "title": "RSNA Knee - First GPU Training",
+  "code_file": "rsna_knee_gpu_baseline.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": ["rsna-knee-abnormality-detection"],
+  "dataset_sources": [],
+  "kernel_sources": []
+}

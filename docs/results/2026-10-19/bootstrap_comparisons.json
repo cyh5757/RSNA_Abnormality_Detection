@@ -1,0 +1,72 @@
+[
+  {
+    "a": "s13_ensemble",
+    "b": "e09_protocols",
+    "mean_auc_difference": 0.004306889991931739,
+    "percentile_95_low": -0.03296673426910693,
+    "percentile_95_high": 0.03966105817210132,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "s13_ensemble",
+    "b": "s11_cross",
+    "mean_auc_difference": 0.01203365059508299,
+    "percentile_95_low": -0.003995344256993502,
+    "percentile_95_high": 0.02800888434004323,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "s10_gate",
+    "b": "e09_protocols",
+    "mean_auc_difference": -0.004126951117073396,
+    "percentile_95_low": -0.040345197953734306,
+    "percentile_95_high": 0.03297610636998969,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "s02_slice5",
+    "b": "s03_slice10",
+    "mean_auc_difference": 0.008536142986388384,
+    "percentile_95_low": -0.014586494918578084,
+    "percentile_95_high": 0.03308954311360087,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "r01_e09_s13_blend",
+    "b": "s13_ensemble",
+    "mean_auc_difference": 0.023011784721975292,
+    "percentile_95_low": 0.004225719590728644,
+    "percentile_95_high": 0.04226435881596297,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "r04_confidence",
+    "b": "s10_gate",
+    "mean_auc_difference": 0.0,
+    "percentile_95_low": 0.0,
+    "percentile_95_high": 0.0,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  },
+  {
+    "a": "r05_label_loss",
+    "b": "s10_gate",
+    "mean_auc_difference": -0.0049947847182458815,
+    "percentile_95_low": -0.02592516601393973,
+    "percentile_95_high": 0.016465507151035202,
+    "valid_resamples": 5000,
+    "total_resamples": 5000,
+    "note": "Descriptive paired study bootstrap; ignores model selection and retraining variability."
+  }
+]

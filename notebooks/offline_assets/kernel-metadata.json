@@ -1,0 +1,14 @@
+{
+  "id": "choiyoungwhan/rsna-knee-offline-assets",
+  "title": "RSNA Knee Offline Assets",
+  "code_file": "prepare_assets.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": [],
+  "kernel_sources": ["choiyoungwhan/rsna-knee-first-gpu-training/4"],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:2757e0c7d1e0a9cb43da657b97e223c321a98f5014bdf64f44f2f6b083ad2b2f"
+}

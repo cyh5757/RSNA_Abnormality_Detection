@@ -1,0 +1,15 @@
+{
+  "id": "choiyoungwhan/rsna-knee-experiments-and-error-analysis",
+  "title": "RSNA Knee Experiments and Error Analysis",
+  "code_file": "rsna_knee_experiment_journal.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "competition_sources": [
+    "rsna-knee-abnormality-detection"
+  ],
+  "dataset_sources": [],
+  "kernel_sources": []
+}
