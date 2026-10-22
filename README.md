@@ -59,6 +59,8 @@ flowchart LR
 
 ## 실행과 재현 범위
 
+**RTX 5090 로컬 파인튜닝:** [로컬 GPU 학습 안내](docs/local_gpu_training.md). 별도 CUDA 환경을 준비한 뒤 `scripts/run_local_training.ps1 -Mode check`, `-Mode smoke`, `-Mode train` 순서로 R06을 실행한다. 영상 데이터와 S11 train v1의 모델·특징 캐시가 필요하며, 실행 중인 Kaggle 큐와 별도 출력에 저장한다.
+
 Windows PowerShell 환경 예시:
 
 ```powershell

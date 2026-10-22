@@ -18,7 +18,9 @@ PARENTS=dict(e01_resnet18_5='e00_resnet18_3',e02a_dinov2_5='e01_resnet18_5',e02b
     t00_position_control='s11_cross',t01_position_sum='t00_position_control',t02_position_joint='t01_position_sum',
     u00_control='s11_cross',u01_mm_crop='u00_control',u02_orientation='u01_mm_crop',u03_patch_attention='u02_orientation',
     u04_full_ft1='u03_patch_attention',u05_full_ft3='u04_full_ft1',u06_flip_tta='u05_full_ft3',
-    u07_probability_blend='u05_full_ft3',u08_rank_blend='u07_probability_blend')
+    u07_probability_blend='u05_full_ft3',u08_rank_blend='u07_probability_blend',
+    v00_gate_blend='r01_e09_s13_blend',v01_depth_blend='r01_e09_s13_blend',v02_slice_blend='r01_e09_s13_blend',
+    v03_slice_dropout='s10_gate',v04_seed_mean='s10_gate',v05_convnext='s10_gate',v06_convnext_blend='r01_e09_s13_blend')
 
 
 def comparison_tables(summary,detail):

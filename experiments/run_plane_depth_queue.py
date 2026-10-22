@@ -9,7 +9,7 @@ from experiments.followup_configs import INPUTS, followup_configs
 from experiments.plane_depth_configs import plane_depth_configs
 from experiments.plane_depth_notebooks import build_plane_depth
 from experiments.run_followup_queue import resolve_verified_inputs, wait_for_gpu
-from experiments.run_queue import run, write_json, verify_results
+from experiments.run_queue import run, write_json, verify_results, retry_kaggle_read
 from experiments.run_spatial_queue import exclusive_lock, RunnerBusy
 
 
@@ -53,6 +53,35 @@ def verify_finished_followup(previous):
         raise ValueError('Unknown R07 decision.')
 
 
+class QuotaDeferred(RuntimeError):
+    """No upload was attempted because the current free GPU budget is too small."""
+
+
+def check_scheduling_predecessor(previous, configs, available_quota_only):
+    if not available_quota_only:
+        verify_finished_followup(previous)
+    elif any(c.get('train_dependencies') != ['s11_cross'] for c in configs):
+        # Only the scheduling order may change; real data dependencies stay verified.
+        raise ValueError('Early execution requires S11-only training dependencies.')
+
+
+def require_available_gpu(api, mode, status_path):
+    if mode not in ('train', 'submit'):
+        raise ValueError('Unknown notebook mode.')
+    # Admission margins, not timeouts: reserve .75h for cached-feature training
+    # plus .5h for its offline inference before starting a new experiment.
+    needed = 1.25 if mode == 'train' else .5
+    quota = retry_kaggle_read(api.quota_view)
+    gpu = quota.gpu_quota
+    remaining = (gpu.total_time_allowed - gpu.time_used - gpu.time_reserved).total_seconds() / 3600
+    ready = remaining >= needed
+    write_json(status_path, dict(status='ready' if ready else 'deferred_for_quota',
+        mode=mode, required_hours=needed, remaining_hours=remaining,
+        refresh_time=str(quota.quota_refresh_time)))
+    if not ready:
+        raise QuotaDeferred(f'{mode}: {remaining:.2f}h available, {needed:.2f}h required.')
+
+
 def wait_and_execute(lock_path, status_path, poll_seconds, callback, sleep=time.sleep):
     while True:
         try:
@@ -71,6 +100,8 @@ def main():
     parser.add_argument('--wait-for-run', default='followup-20261019')
     parser.add_argument('--poll-seconds', type=int, default=60)
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--available-quota-only', action='store_true',
+        help='Run S11-ready experiments before the follow-up queue; stop if current quota is insufficient.')
     args = parser.parse_args()
     if (any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,65}', name)
             for name in (args.run_name, args.wait_for_run)) or args.poll_seconds < 10
@@ -84,7 +115,11 @@ def main():
         print('Verified frozen input: S11 train v' + str(inputs['s11_cross']['job']['train']['version']))
         print('Order:', ' -> '.join(c['id'] for c in configs))
         print('Output:', output)
-        print('Require completed predecessor:', args.wait_for_run, '(including conditional R07)')
+        if args.available_quota_only:
+            check_scheduling_predecessor(root / args.wait_for_run, configs, True)
+            print('Use verified S11 now; stop when quota is below train+submit 1.25h / submit .5h.')
+        else:
+            print('Require completed predecessor:', args.wait_for_run, '(including conditional R07)')
         print('Wait for shared lock; reuse S11 tokens; private GPU train -> offline submit -> verify.')
         print('No official leaderboard submission. No uploads in dry run.')
         return
@@ -93,7 +128,7 @@ def main():
         logging.StreamHandler(), logging.FileHandler(output / 'runner.log', encoding='utf-8')])
 
     def execute():
-        verify_finished_followup(root / args.wait_for_run)
+        check_scheduling_predecessor(root / args.wait_for_run, configs, args.available_quota_only)
         if plane_depth_configs() != configs:
             raise ValueError('Experiment sources changed while waiting. Restart this queue to review the new configuration.')
         pin = output / 'inputs.json'
@@ -106,7 +141,13 @@ def main():
 
         def before_upload(config, mode, metadata):
             # Cache reuse avoids a multi-hour DICOM feature extraction pass.
-            wait_for_gpu(api, .75 if mode == 'train' else .5, output / 'quota_wait.json')
+            if args.available_quota_only:
+                require_available_gpu(api, mode, output / 'quota_wait.json')
+            else:
+                wait_for_gpu(api, .75 if mode == 'train' else .5, output / 'quota_wait.json')
+            write_json(output / 'queue_status.json', {
+                'status': 'running', 'experiment': config['id'], 'mode': mode,
+                'available_quota_only': args.available_quota_only})
 
         run(api, configs, output, args.poll_seconds, builder=build_plane_depth,
             external_jobs={k: v['job'] for k, v in inputs.items()}, before_upload=before_upload)
@@ -121,6 +162,10 @@ def main():
         parser.exit(1, 'Another plane-depth queue is already waiting/running.\n')
     except KeyboardInterrupt:
         parser.exit(130, 'Local runner stopped; rerun the same command to resume pinned versions.\n')
+    except QuotaDeferred as exc:
+        logging.info('Deferred without upload: %s', exc)
+        write_json(output / 'queue_status.json', {
+            'status': 'deferred_for_quota', 'reason': str(exc)})
     except Exception as exc:
         logging.error('%s: %s', type(exc).__name__, exc)
         write_json(output / 'queue_status.json', {'status': 'stopped', 'error_type': type(exc).__name__})

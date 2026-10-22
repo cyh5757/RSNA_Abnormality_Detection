@@ -3,6 +3,7 @@ import contextlib
 import json
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -218,6 +219,46 @@ class PlaneDepthTest(unittest.TestCase):
             (root / 'state.json').write_text(json.dumps({'jobs': {}}))
             with self.assertRaises(RuntimeError):
                 verify_finished_followup(root)
+
+    def test_available_quota_schedule_requires_only_verified_s11_dependencies(self):
+        from experiments.run_plane_depth_queue import check_scheduling_predecessor
+        configs = plane_depth_configs()
+        with patch('experiments.run_plane_depth_queue.verify_finished_followup') as verify:
+            check_scheduling_predecessor(Path('previous'), configs, False)
+            verify.assert_called_once_with(Path('previous'))
+            verify.reset_mock()
+            check_scheduling_predecessor(Path('previous'), configs, True)
+            verify.assert_not_called()
+            changed = [dict(configs[0], train_dependencies=['r02_wide'])]
+            with self.assertRaises(ValueError):
+                check_scheduling_predecessor(Path('previous'), changed, True)
+
+    def test_available_quota_reserves_train_and_submit_and_defers_without_sleep(self):
+        from experiments.run_plane_depth_queue import require_available_gpu, QuotaDeferred
+        api = Mock()
+        quota = api.quota_view.return_value
+        quota.gpu_quota.total_time_allowed = timedelta(hours=30)
+        quota.gpu_quota.time_used = timedelta(hours=28)
+        quota.gpu_quota.time_reserved = timedelta(hours=.8)
+        quota.quota_refresh_time = '2026-10-24'
+        with tempfile.TemporaryDirectory() as tmp:
+            status = Path(tmp) / 'quota.json'
+            # 1.2h remains: enough for training alone, not the full 1.25h pair.
+            with self.assertRaises(QuotaDeferred):
+                require_available_gpu(api, 'train', status)
+            self.assertEqual(api.quota_view.call_count, 1)
+            saved = json.loads(status.read_text())
+            self.assertEqual(saved['status'], 'deferred_for_quota')
+            self.assertEqual(saved['required_hours'], 1.25)
+            self.assertAlmostEqual(saved['remaining_hours'], 1.2)
+            # An already-trained model can still finish its offline submit step.
+            require_available_gpu(api, 'submit', status)
+            self.assertEqual(json.loads(status.read_text())['status'], 'ready')
+            quota.gpu_quota.time_reserved = timedelta(hours=.75)
+            require_available_gpu(api, 'train', status)
+            self.assertEqual(json.loads(status.read_text())['status'], 'ready')
+            with self.assertRaises(ValueError):
+                require_available_gpu(api, 'unknown', status)
 
 
 if __name__ == '__main__':
