@@ -4,11 +4,27 @@
 
 [사용 방법과 전체 Notebook 목록](experiment_notebooks.md)
 
+## Public Score 기록 — 2026-10-22
+
+출처: 사용자가 제공한 Kaggle 제출 목록 스크린샷. 아래 값은 **Public Score**이며, 로컬 Gold58 OOF나 Private Score가 아니다. 5건 모두 화면에서 `Succeeded`로 표시됐다. 제출 시점은 화면의 상대 시간을 그대로 기록했으며, 정확한 제출 일시는 확인하지 않았다.
+
+| 제출 이름 | 버전 | 화면의 제출 시점 | Public Score | Select 체크 | 비고 |
+| --- | --- | --- | ---: | --- | --- |
+| `RSNA Knee v02_slice_blend submit` | Version 1 | 20h ago | **0.805** | 선택됨 | 화면 내 최고 점수 |
+| `RSNA Knee r01_e09_s13_blend submit` | Version 2 | 2d ago | 0.797 | 미선택 | 동일 이름·버전의 별도 제출 |
+| `RSNA Knee r01_e09_s13_blend submit` | Version 2 | 3d ago | 0.797 | 미선택 | 동일 이름·버전의 별도 제출 |
+| `RSNA Knee e02b_swin_5 submit` | Version 1 | 6d ago | 0.688 | 미선택 | |
+| `RSNA Knee Offline Submission` | Version 1 | 6d ago | 0.642 | 미선택 | baseline |
+
+V02의 Public Score는 R01보다 **+0.008**, baseline보다 **+0.163** 높다. 선택 여부는 스크린샷 시점의 상태다. 아래 학습·오프라인 실행 기록과 구분한다.
+
+## 초기 backbone 비교 기록
+
 Backbone 비교 6개를 순서대로 Kaggle GPU에서 학습했다. 후속 E03~E05의 기준은 **Swin-T**로 선택했다. 이번 비교는 사전학습 backbone을 고정하고 12개 출력을 내는 분류기를 학습한 결과다.
 
 ## 실제 실행 버전
 
-아래 링크는 이 계정의 비공개 Notebook이다. 학습과 제출 모두 GPU를 사용하며 제출 Notebook의 Internet OFF 설정을 확인했다. 완료된 제출 버전은 공개 테스트 3건의 `submission.csv`를 생성한다. 공식 리더보드 제출은 실행하지 않았다.
+아래 링크는 이 계정의 비공개 Notebook이다. 학습과 제출 모두 GPU를 사용하며 제출 Notebook의 Internet OFF 설정을 확인했다. 완료된 제출 버전은 공개 테스트 3건의 `submission.csv`를 생성한다. 초기 실행 기록 당시에는 공식 리더보드 제출을 실행하지 않았다. 이후 확인된 Public Score는 위 표에 기록했다.
 
 | 실험 | 학습 버전 | 오프라인 제출 버전 |
 | --- | --- | --- |

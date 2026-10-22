@@ -226,6 +226,6 @@ gold와 보고서 YES/NO를 직접 대조한 결과도 저장했다. 예를 들�
 
 ## 10. 실제 Kaggle 점수와 남은 확인
 
-2026-10-19 계정 제출 기록 조회에서 확인된 Public 점수는 [원래 baseline](https://www.kaggle.com/code/choiyoungwhan/rsna-knee-offline-submission) **0.642**, [E02b Swin](https://www.kaggle.com/code/choiyoungwhan/rsna-knee-e02b-swin-5-submit) **0.688**이다. 새 E09/S13의 공식 점수는 아직 없다. 제출용 Notebook 완료는 대회 채점 완료를 뜻하지 않는다.
+2026-10-19 계정 제출 기록 조회에서 확인된 Public 점수는 [원래 baseline](https://www.kaggle.com/code/choiyoungwhan/rsna-knee-offline-submission) **0.642**, [E02b Swin](https://www.kaggle.com/code/choiyoungwhan/rsna-knee-e02b-swin-5-submit) **0.688**이다. 당시에는 새 E09/S13의 공식 점수가 확인되지 않았다. 이후 2026-10-22 사용자 제공 제출 화면에서 R01 E09/S13 blend v2 **0.797**, V02 slice blend v1 **0.805**를 Public Score로 확인했다. [전체 제출 기록](notebook_run_results.md). 제출용 Notebook 완료는 대회 채점 완료를 뜻하지 않는다.
 
 실제 MRI 영상의 병변 위치, 임상적 원인 판독, 새 독립 gold 검증은 이번 분석 범위에 포함하지 않았다. 후속 기획만 작성했으며 새 학습·공식 제출은 실행하지 않았다.

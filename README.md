@@ -10,6 +10,8 @@ ResNet baseline에서 시작해 backbone, 보고서 약라벨, 슬라이스 개�
 
 ## 현재 결과
 
+**Public Score (2026-10-22 사용자 제공 제출 화면): V02 slice blend v1 0.805, R01 E09/S13 blend v2 0.797, E02b Swin v1 0.688, baseline v1 0.642.** 화면에서 V02가 선택돼 있다. 중복 제출을 포함한 5건의 버전·선택 상태는 [Public Score 기록](docs/notebook_run_results.md)에 남겼다.
+
 **2026-10-19 기준 33개 실험 구성의 학습·오프라인 제출 파일 생성이 완료됐다.** 최고 개발 OOF macro AUC는 R01 고정 앙상블의 **0.771432**다. 아래 수치는 Kaggle 리더보드 점수나 정확도가 아니다.
 
 | 비교 | OOF macro AUC 평균 | 관찰 |
