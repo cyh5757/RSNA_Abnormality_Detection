@@ -44,6 +44,19 @@ class LocalTrainingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             train_local.smoke_indices(gold[:3], groups[:3])
 
+    def test_early_stopping_is_a_separate_recipe_with_the_same_frozen_parent(self):
+        parent = self.parent_config()
+        config = train_local.local_config(parent, early_stopping=True)
+        self.assertEqual(spatial_signature(config), spatial_signature(parent))
+        self.assertEqual(config['train_dependencies'], ['s11_cross'])
+        self.assertEqual(config['early_stopping_patience'], 3)
+        self.assertEqual(config['backbone_epochs'], 30)
+        self.assertGreater(config['backbone_timeout_hours'], 30*2)
+        original = train_local.local_config(parent)
+        self.assertNotEqual(config['id'], original['id'])
+        self.assertEqual(original['backbone_epochs'], 1)
+        self.assertNotIn('early_stopping_patience', original)
+
     def test_local_paths_are_scoped_and_restored_on_failure(self):
         old_labels, old_parent = spatial_train.find_report_labels, spatial_train.find_training_run
         with self.assertRaisesRegex(RuntimeError, 'stop'):

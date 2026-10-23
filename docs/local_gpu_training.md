@@ -1,8 +1,36 @@
 # RTX 5090 로컬 파인튜닝
 
-기존 R06의 **weak-only head warm-up 1 epoch → Swin 마지막 stage와 norm 1 epoch 학습 → 특징 재추출 → Gold58 3-fold × 3-seed 평가**를 Windows 로컬 CUDA GPU에서 실행한다. 전체 Swin을 학습하는 U04/U05는 이 실행기의 대상이 아니다. 실제 학습 결과가 나오기 전에는 성능 개선을 주장하지 않는다.
+대회 종료 시점의 완료 결과와 진행 중인 작업은 [2026-10-23 정리](competition_wrapup_20261023.md)를 참고한다. 아래 실행·검증 기록의 시간은 각 작업 당시 기준이다.
 
-학습 계산은 기존 `experiments/spatial_train.py`를 재사용한다. 로컬 실행기는 Kaggle 경로를 찾는 두 함수만 해당 프로세스 안에서 연결한다. 실행 중인 Kaggle 캠페인의 소스 hash, 대기 순서와 상태 파일은 변경하지 않는다. 로컬 실험 ID는 `r06_local_warmup`이며 Kaggle R06과 별도로 기록한다.
+기본 모드는 기존 R06의 **weak-only head warm-up 1 epoch → Swin 마지막 stage와 norm 1 epoch 학습 → 특징 재추출 → Gold58 3-fold × 3-seed 평가**를 Windows 로컬 CUDA GPU에서 실행한다. `-EarlyStopping`을 추가하면 검증 loss에 따라 학습 횟수를 결정하는 별도 실험을 실행한다. `-PublicFinetuning`은 전체 Swin과 LR warm-up/cosine을 쓰는 로컬 후속 recipe이며 기존 U04/U05와 구분한다. 실제 학습 결과가 나오기 전에는 성능 개선을 주장하지 않는다.
+
+학습 계산은 `experiments/spatial_train.py`를 재사용하고, 로컬 실행기가 Kaggle 경로를 찾는 두 함수를 해당 프로세스 안에서 연결한다. 로컬 실험 ID는 기본 모드 `r06_local_warmup`, early stopping 모드 `local_earlystop_p3`이며 Kaggle 실험과 별도로 기록한다. 2026-10-23 공통 학습 루프에 선택적 early stopping과 매 epoch 기록 저장을 추가했다. 각 로컬 실행은 해당 소스 hash를 저장하며, 기존 Kaggle 캠페인의 저장된 notebook·상태 파일은 수정하지 않는다.
+
+## 2026-10-23: 검증 loss 기반 파인튜닝
+
+사용자 지시에 따라 고정 1/3 epoch 실험과 별도로 **weak validation BCE가 3 epoch 연속 최저값을 갱신하지 않으면 종료**한다. 값이 같아도 미개선으로 세며, 조금이라도 낮아지면 대기 횟수를 0으로 초기화한다(`min_delta=0`). 과적합이 전혀 없음을 보장하는 기준은 아니다.
+
+- 초기값: 원래 동결 S11 encoder + 새 head warm-up 1 epoch. 이전 R06의 마지막 상태에서 이어 학습하지 않는다.
+- 학습 대상: 기존 Swin 마지막 stage/norm과 head. 학습률은 backbone `1e-5`, head `1e-4`를 유지한다.
+- 데이터: weak train 3,835건 / weak validation 457건. Gold58은 backbone 학습과 early stopping 모두에서 제외한다.
+- 최대 30 epoch. 기존 Kaggle용 FT 7시간 제한 대신 이 로컬 모드에만 72시간 제한을 둔다. 시간 제한은 실패로 기록하며 수렴으로 간주하지 않는다.
+- 매 epoch 검증 후 최저 loss의 `backbone_best.pt`를 저장한다. 종료 시 **최적 backbone을 복원**하고 전체 특징 재추출 → 기존 Gold58 OOF 평가 → 최종 head 학습·bundle 저장을 수행한다. 마지막 epoch의 head를 최종 제출 head로 쓰지 않는다.
+- `backbone_history.csv`와 `backbone_audit.json`을 매 epoch 갱신한다. audit에 best epoch, 완료 epoch, 미개선 횟수, 종료 사유(`early_stopping` / `max_epochs`)를 남긴다. 학습 도중 사유는 `running`이다.
+- 실행 중 파일 잠금으로 동일 로컬 작업 중복을 막고 Windows 자동 절전을 억제한다. 수동 절전·재부팅은 막지 않으며 epoch 중간 재개는 지원하지 않는다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_local_training.ps1 -Mode check -EarlyStopping
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_local_training.ps1 -Mode smoke -EarlyStopping
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_local_training.ps1 -Mode train -EarlyStopping
+```
+
+출력은 `outputs/local/earlystop-p3-rtx5090-smoke/`와 `outputs/local/earlystop-p3-rtx5090-train/`으로 분리한다. 이미 존재하는 출력에는 쓰지 않으며 재실행은 새로운 `-Output`이 필요하다. 다운로드는 반복하지 않고 준비된 MRI를 사용한다. agent의 지속 모니터링 없이 일반 프로세스로 실행한다.
+
+비교 기준인 R06은 **2026-10-22 17:59:42–21:46:27 KST**, 약 **3시간 47분**에 정상 완료됐다. OOF AUC **0.727763**, weak validation BCE **0.572002**이다. R06 소요 시간은 백본·warm-up 약 1시간 52분, 특징 재추출 약 1시간 47분이었다. 새 실행의 총 시간은 실제 중단 epoch에 따라 달라지며 고정 3 epoch 예상 시간과 구분한다.
+
+검증: 전체 자동 테스트 119개 중 CPU 환경의 GPU 전용 3개를 제외한 116개가 통과했다. GPU 환경에서는 관련 11개(해당 GPU 전용 3개 포함)가 모두 통과했다. 실제 MRI 3건 smoke도 성공했고, best epoch 2 이후 3번 미개선으로 **epoch 5에서 종료**했다. smoke 학습·검증 시간 13.531초, 최대 CUDA 할당량 810.481 MiB이며 전체 학습 성능·메모리 추정값으로 사용하지 않는다. CPU 테스트의 기존 TorchScript/Python 3.14 경고와 실제 GPU 학습의 Python 3.11 환경을 구분한다.
+
+**2026-10-23 09:38 KST** 숨김 백그라운드 실행을 시작했다(launcher PID 4388). 4,350건·선택 시리즈 21,045개 입력 검사를 통과하고 **09:38:43 KST 실제 worker PID 53160, `running`**을 확인했다. 실행 명령과 시작 시간은 [launch.json](../outputs/local/earlystop-p3-unattended-20261023/launch.json), 표준 출력은 [runner.log](../outputs/local/earlystop-p3-unattended-20261023/runner.log), 오류 출력은 [runner.stderr.log](../outputs/local/earlystop-p3-unattended-20261023/runner.stderr.log)에 기록한다. [local_run.json](../outputs/local/earlystop-p3-rtx5090-train/local_run.json)에 실제 학습 PID·설정·시작 시간·완료/실패 상태가 저장된다. 현재 결과를 이전 R06이나 smoke 결과와 혼동하지 않는다.
 
 ## 1. GPU 환경 준비
 
@@ -63,7 +91,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_local_training
     -Output D:\RSNA_Abnormality_Detection\outputs\local\r06-second-attempt
 ```
 
-Python 진입점은 `python -m scripts.train_local --help`로 확인한다. 기본 모드는 `check`다. 학습률과 입력 구조를 바꾸는 옵션은 제공하지 않으며 R06 비교 조건을 유지한다. 현재 학습 코어의 FT/특징 추출 단계별 7시간 제한도 유지한다. 실제 5090 소요 시간은 smoke 후 전체 학습에서 측정해야 한다.
+Python 진입점은 `python -m scripts.train_local --help`로 확인한다. 기본 모드는 `check`다. 임의 학습률과 입력 구조를 바꾸는 옵션은 제공하지 않으며 기본 R06 비교 조건을 유지한다. 기본 R06의 FT/특징 추출 단계별 7시간 제한도 유지한다. early stopping과 공개 방법 모드는 FT 제한을72시간으로 늘리며 특징 추출 제한은 그대로다.
 
 ## 2026-10-22: 기존 Python 3.11 GPU 환경의 smoke 결과
 
@@ -108,6 +136,37 @@ LLM 호출, 예약 agent, Kaggle 공식 제출은 없다. 실행 중 프로세�
 ```powershell
 .\.venv\Scripts\python.exe -u -X utf8 -m scripts.run_local_r06
 ```
+
+## 2026-10-23: 공개 방법 기반 후속 큐
+
+[공개 원문 7개 계열과 점수 근거](kaggle_finetuning_evidence_20261023.md)를 수집하고, S6의 전체 encoder·LR warm-up/cosine과 ConvNeXt/CoAtNet의 checkpoint 가중치 평균을 현재 Swin에 적용한다. 공개 모델의 정확한 재현이 아니며 full scope와 scheduler가 함께 바뀌는 recipe 비교다. 공개 all-data 가중치는 사용하지 않는다.
+
+현재 `earlystop-p3-rtx5090-train`이 **정상 완료한 다음** 다음 순서로 실행한다.
+
+| 단계 | 실행 내용 | 출력 폴더 |
+|---|---|---|
+| smoke | 실제 MRI 3건으로 전체 encoder backward·checkpointing·종료 조건 확인 | `outputs/local/public-finetune-20261023/smoke/` |
+| full | 전체 Swin + head warm-up 1 epoch + LR 5% warm-up/cosine + valid BCE patience3 | 같은 경로의 `full/` |
+| average3 | full의 weak-validation BCE 상위3 encoder 가중치 평균 → 특징 재추출·OOF·최종 head 학습 | 같은 경로의 `average3/` |
+| 비교 | 기존 부분 FT / full best / full average3의 OOF AUC·seed SD·BCE 저장 | 같은 경로의 `comparison.json` |
+
+full 설정은 encoder/head 최대 LR **1e-5/1e-4**, AdamW WD.01, accumulation 8 studies, FP16, gradient checkpointing(chunk4), 최대30epoch·FT72시간 제한이다. LR는 최대30epoch의 예정 optimizer step 수를 기준으로 앞5%에서 선형 증가하고 이후 cosine으로 최대 LR의1%까지 감소한다. 이 수치들은 현재 코드에 맞춘 보수적 로컬 설정으로 S6의 backbone·LR·epoch·bf16을 그대로 복제한 것이 아니다. 입력·crop224·약라벨·weak3835/457 분할은 유지하고 Gold58은 backbone 학습·checkpoint 선택에서 제외한다. 최종 OOF head와 feature 추출은 기존 평가 경로를 재사용한다.
+
+가중치 평균은 **encoder만** 평균한다. 같은 학습 궤적의 가장 낮은 weak-validation BCE 3개를 선택하고 각 파일 SHA256을 확인한다. 정수 buffer는 서로 동일해야 하며 NaN/Inf·다른 recipe·미완료 원본을 거부한다. 평균 encoder에 대해 head는 새로 학습한다. 평균 결과가 단일 best보다 우수하다고 자동 선언하거나 Public 결과로 해석하지 않는다.
+
+실행기 [run_local_public_methods.py](../scripts/run_local_public_methods.py)는 source snapshot과 입력 hash를 고정한다. 현재 학습의 이전 소스도 해당 실행 폴더의 `source_snapshot/`에 원래 hash와 일치하는 상태로 보존했다. 후속 worker는 큐의 `source/` 복사본에서 실행하므로 이후 작업공간 코드 변경과 구분된다. 같은 GPU 잠금을 공유하며 선행 실패·사라진 worker의 stale 상태·입력 변경·smoke 실패는 후속 학습을 중단한다. 기존 출력을 덮어쓰거나 자동 재학습하지 않는다. LLM 모니터링·공식 제출은 없다.
+
+```powershell
+# 새 큐를 준비할 때 1회 실행. 기존 큐 폴더가 있으면 중단한다.
+.\.venv\Scripts\python.exe -m scripts.run_local_public_methods --prepare
+# 실제 실행은 큐 source/를 작업 디렉터리로 사용하며, --queue-dir에 위 큐의 절대 경로를 전달한다.
+```
+
+상태는 `outputs/local/public-finetune-20261023/status.json`, 로그는 같은 폴더의 `runner.log` / `runner.stderr.log`, 고정 내역은 `pins.json`에 남긴다. 실제 MRI smoke는 현재 작업의 GPU 잠금이 해제된 뒤 자동 실행한다. 새 full 실험의 소요 시간·VRAM·OOF는 아직 측정 전이다.
+
+**2026-10-23 09:50 KST** 백그라운드 큐를 시작했고 `waiting_for_predecessor`를 확인했다. launcher PID **48208**, 실제 worker PID **49900**. 현재 부분 FT의 PID53160은 계속 실행 중이며 후속 full 학습이 이미 시작됐다는 의미가 아니다. 독립 소스40개를 고정했고 해당 복사본에서 CUDA·4,350건·21,045시리즈 입력 검사를 통과했다. 전체 자동 테스트125개 중 CPU121개 통과, GPU 전용4개는 별도 GPU 실행에서 통과했다(관련 GPU 환경 테스트10개 모두 성공). 기존 독립 Kaggle notebook 생성 회귀도 통과했다.
+
+정규 대회 마감은 **2026-10-23 08:59 KST**였다. Late submission 활성화는 확인되지 않았으므로 이 큐는 로컬 개발 평가까지 진행하며 Public 점수 갱신을 약속하지 않는다. [공식 Timeline](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection/overview/timeline)
 
 ## 출력과 재실행
 

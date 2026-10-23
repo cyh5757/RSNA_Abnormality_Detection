@@ -10,6 +10,32 @@ from experiments.train import export_encoder
 from experiments.spatial_core import *
 
 
+def warmup_cosine_scale(step, total_steps):
+    if total_steps < 1 or step < 0:
+        raise ValueError('Invalid learning-rate step count.')
+    warmup = max(1, math.ceil(total_steps * .05))
+    if step < warmup:
+        return (step + 1) / warmup
+    progress = min(1., (step - warmup) / max(1, total_steps - warmup))
+    return .01 + .99 * .5 * (1 + math.cos(math.pi * progress))
+
+
+def retain_backbone(encoder, out, epoch, score, keep):
+    path = out/'backbone_candidates.json'
+    rows = json.loads(path.read_text()) if path.exists() else []
+    if len(rows) >= keep and score >= max(row['validation_bce'] for row in rows):
+        return
+    name = f'backbone_epoch_{epoch:03d}.pt'
+    temporary = out/(name+'.tmp')
+    torch.save({k: v.detach().cpu() for k, v in encoder.state_dict().items()}, temporary)
+    temporary.replace(out/name)
+    rows.append(dict(epoch=epoch, validation_bce=score, file=name, sha256=file_hash(out/name)))
+    rows = sorted(rows, key=lambda row: (row['validation_bce'], row['epoch']))[:keep]
+    temporary = path.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(rows, indent=2), encoding='utf-8')
+    temporary.replace(path)
+
+
 def feature_statistics(tokens, mask, indices):
     total=torch.zeros(tokens.shape[-1],dtype=torch.float64)
     squares=torch.zeros_like(total); count=0
@@ -90,6 +116,19 @@ def weak_finetune_split(gold, groups):
 
 
 def finetune_spatial(encoder,cache,table,y,weights,gold,groups,series,data,config,out):
+    patience=config.get('early_stopping_patience')
+    max_epochs=config['backbone_epochs']
+    timeout_hours=config.get('backbone_timeout_hours',7.)
+    full=config.get('backbone_scope','last_stage')=='full'
+    schedule=config.get('backbone_schedule','constant')
+    keep=config.get('keep_backbone_checkpoints',1)
+    if config.get('backbone_scope','last_stage') not in ('last_stage','full') or schedule not in ('constant','warmup_cosine'):
+        raise ValueError('Unknown backbone training recipe.')
+    if type(keep) is not int or keep<1: raise ValueError('Invalid checkpoint count.')
+    if patience is not None and (type(patience) is not int or patience<1):
+        raise ValueError('Early-stopping patience must be a positive integer.')
+    if type(max_epochs) is not int or max_epochs<1 or not np.isfinite(timeout_hours) or timeout_hours<=0:
+        raise ValueError('Invalid backbone epoch or time limit.')
     train_index,valid=weak_finetune_split(gold,groups)
     torch.manual_seed(42)
     warmup_epochs=config.get('head_warmup_epochs',0)
@@ -101,23 +140,39 @@ def finetune_spatial(encoder,cache,table,y,weights,gold,groups,series,data,confi
         pd.DataFrame(warmup).to_csv(out/'warmup_history.csv',index=False)
     else:
         head=SpatialHead(config,*feature_statistics(cache['tokens'],cache['mask'],train_index)).cuda()
-    encoder=encoder.cuda(); parameters=freeze_swin_except_last_stage(encoder)
+    encoder=encoder.cuda()
+    if full:
+        encoder.requires_grad_(True); parameters=list(encoder.parameters())
+    else:
+        parameters=freeze_swin_except_last_stage(encoder)
     head=head.cuda()
     optimizer=torch.optim.AdamW([dict(params=parameters,lr=1e-5),dict(params=head.parameters(),lr=1e-4)],weight_decay=.01)
+    scheduler=None
+    if schedule=='warmup_cosine':
+        total_steps=max_epochs*math.ceil(len(train_index)/8)
+        scheduler=torch.optim.lr_scheduler.LambdaLR(optimizer,lambda step:warmup_cosine_scale(step,total_steps))
     scaler=torch.amp.GradScaler('cuda'); transform=make_transform(config)
-    deadline=time.monotonic()+7*3600; best=float('inf'); history=[]; best_epoch=None
+    deadline=time.monotonic()+timeout_hours*3600; best=float('inf'); history=[]; best_epoch=None
+    stale_epochs=0
 
     def predict(index):
-        if time.monotonic()>deadline: raise TimeoutError('Spatial FT exceeded 7h budget.')
+        if time.monotonic()>deadline: raise TimeoutError(f'Spatial FT exceeded {timeout_hours:g}h budget.')
         images,mask,coords=spatial_views(table.StudyInstanceUID.iloc[index],series,data/'train_series',transform,config)
         with torch.autocast('cuda',dtype=torch.float16):
-            features=torch.cat([encoder(chunk.cuda()) for chunk in images[mask].split(8)])
+            if config.get('gradient_checkpointing') and torch.is_grad_enabled():
+                from torch.utils.checkpoint import checkpoint
+                features=torch.cat([checkpoint(encoder,chunk.cuda(),use_reentrant=False) for chunk in images[mask].split(4)])
+            else:
+                features=torch.cat([encoder(chunk.cuda()) for chunk in images[mask].split(8)])
             device_mask=mask.cuda(); tokens=features.new_zeros(*mask.shape,config['feature_dim'])
             tokens[device_mask]=features
             return head(tokens[None],device_mask[None],coords[None].cuda())
 
-    for epoch in range(1,config['backbone_epochs']+1):
-        encoder.eval(); encoder.features[-1].train(); head.train()
+    for epoch in range(1,max_epochs+1):
+        epoch_started=time.monotonic()
+        if full: encoder.train()
+        else: encoder.eval(); encoder.features[-1].train()
+        head.train()
         order=np.random.default_rng(42+epoch).permutation(train_index); total=0.
         for start in range(0,len(order),8):
             batch=order[start:start+8]; optimizer.zero_grad(set_to_none=True)
@@ -126,7 +181,8 @@ def finetune_spatial(encoder,cache,table,y,weights,gold,groups,series,data,confi
                 if not torch.isfinite(loss): raise ValueError('Non-finite FT loss.')
                 scaler.scale(loss/len(batch)).backward(); total+=loss.item()
             scaler.unscale_(optimizer); torch.nn.utils.clip_grad_norm_([*parameters,*head.parameters()],5.)
-            scaler.step(optimizer); scaler.update()
+            old_scale=scaler.get_scale(); scaler.step(optimizer); scaler.update()
+            if scheduler is not None and scaler.get_scale()>=old_scale: scheduler.step()
             if start%200==0: print(f'FT epoch={epoch} studies={start}/{len(order)}',flush=True)
         encoder.eval(); head.eval(); value=denominator=0.
         with torch.inference_mode():
@@ -136,16 +192,35 @@ def finetune_spatial(encoder,cache,table,y,weights,gold,groups,series,data,confi
                 denominator+=w
         score=value/denominator
         if not np.isfinite(score): raise ValueError('Invalid weak validation loss.')
-        history.append(dict(epoch=epoch,train_loss=total/len(order),weak_validation_bce=score))
+        history.append(dict(epoch=epoch,train_loss=total/len(order),weak_validation_bce=score,
+                            seconds=time.monotonic()-epoch_started,encoder_lr=optimizer.param_groups[0]['lr']))
+        if keep>1:
+            retain_backbone(encoder,out,epoch,score,keep)
         if score<best:
-            best,best_epoch=score,epoch
-            torch.save({k:v.detach().cpu() for k,v in encoder.state_dict().items()},out/'backbone_best.pt')
+            best,best_epoch=score,epoch; stale_epochs=0
+            temporary=out/'backbone_best.pt.tmp'
+            torch.save({k:v.detach().cpu() for k,v in encoder.state_dict().items()},temporary)
+            temporary.replace(out/'backbone_best.pt')
+        else:
+            stale_epochs+=1
+        stop=patience is not None and stale_epochs>=patience
+        reason='running'
+        if stop: reason='early_stopping'
+        elif epoch==max_epochs: reason='max_epochs' if patience else 'fixed_epochs'
+        temporary=out/'backbone_history.csv.tmp'
+        pd.DataFrame(history).to_csv(temporary,index=False); temporary.replace(out/'backbone_history.csv')
+        audit=dict(training_weak_studies=len(train_index),validation_weak_studies=len(valid),
+            gold_studies_used_for_backbone=0,best_epoch=best_epoch,validation_bce=best,
+            head_warmup_epochs=warmup_epochs,warmup_gold_studies=0,
+            trainable_parameters=sum(p.numel() for p in parameters),epochs_completed=epoch,
+            early_stopping_patience=patience,epochs_without_improvement=stale_epochs,stop_reason=reason,
+            backbone_scope='full' if full else 'last_stage',backbone_schedule=schedule)
+        temporary=out/'backbone_audit.json.tmp'
+        temporary.write_text(json.dumps(audit,indent=2),encoding='utf-8'); temporary.replace(out/'backbone_audit.json')
+        print(f'FT epoch={epoch} valid_bce={score:.6f} best={best:.6f} best_epoch={best_epoch} '
+              f'no_improvement={stale_epochs} stop_reason={reason}',flush=True)
+        if stop: break
     encoder.load_state_dict(torch.load(out/'backbone_best.pt',map_location='cpu',weights_only=True))
-    pd.DataFrame(history).to_csv(out/'backbone_history.csv',index=False)
-    (out/'backbone_audit.json').write_text(json.dumps(dict(training_weak_studies=len(train_index),
-        validation_weak_studies=len(valid),gold_studies_used_for_backbone=0,best_epoch=best_epoch,
-        validation_bce=best,head_warmup_epochs=warmup_epochs,warmup_gold_studies=0,
-        trainable_parameters=sum(p.numel() for p in parameters))),encoding='utf-8')
     return encoder.cpu().eval().requires_grad_(False)
 
 
