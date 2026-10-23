@@ -8,11 +8,13 @@ ResNet baseline에서 시작해 backbone, 보고서 약라벨, 슬라이스 개�
 
 진행 내용 업데이트: [GitHub와 VS Code 사용법](docs/github_workflow.md).
 
+**대회 종료 정리 (2026-10-23):** [전체 진행 내용·완료 결과·후속 학습 상태](docs/competition_wrapup_20261023.md). 저장된 OOF 집계는 Kaggle 41개 구성과 로컬 R06 1개이며, 최고 기록 Public은 **0.805**, 개발 OOF는 V00의 **0.780610**이다. 검증 loss 기반 후속 파인튜닝은 정리 시점에 진행 중이다.
+
 ## 현재 결과
 
 **Public Score (2026-10-22 사용자 제공 제출 화면): V02 slice blend v1 0.805, R01 E09/S13 blend v2 0.797, E02b Swin v1 0.688, baseline v1 0.642.** 화면에서 V02가 선택돼 있다. 중복 제출을 포함한 5건의 버전·선택 상태는 [Public Score 기록](docs/notebook_run_results.md)에 남겼다.
 
-**2026-10-19 기준 33개 실험 구성의 학습·오프라인 제출 파일 생성이 완료됐다.** 최고 개발 OOF macro AUC는 R01 고정 앙상블의 **0.771432**다. 아래 수치는 Kaggle 리더보드 점수나 정확도가 아니다.
+**아래는 2026-10-19 기준 33개 실험 구성의 비교다.** 당시 최고 개발 OOF macro AUC는 R01 고정 앙상블의 **0.771432**였다. 이후 T00–T02·V00–V04·로컬 R06을 포함한 [42개 구성 집계](docs/results/2026-10-23/experiment_metrics.csv)는 별도로 보존했다. 아래 수치는 Kaggle 리더보드 점수나 정확도가 아니다.
 
 | 비교 | OOF macro AUC 평균 | 관찰 |
 |---|---:|---|
@@ -41,8 +43,9 @@ flowchart LR
 
 - **E 계열:** ResNet18, DINOv2, Swin-T, ConvNeXt, ViT 비교 → 약라벨 → 2.5D 입력과 촬영 조건 → MIL/부분 fine-tuning.
 - **S 계열:** 인접 3/5/10장, slice self-attention, index/mm RoPE, 방향 embedding, gate/cross-attention, 앙상블.
-- **R 계열:** 오류 분석을 바탕으로 앙상블, 입력 범위, 약라벨 confidence, loss reduction, fine-tuning 조건 비교. R01/R04/R05 완료.
-- **T 계열:** 방향 × slice 깊이 위치 표현 비교. 기존 R 큐 이후 대기 중.
+- **R 계열:** 오류 분석을 바탕으로 앙상블, 입력 범위, 약라벨 confidence, loss reduction, fine-tuning 조건 비교. R01/R04/R05와 로컬 R06 완료.
+- **T 계열:** 방향 × slice 깊이 위치 표현 T00–T02 완료. OOF AUC는 각각 0.722923 / 0.733206 / 0.716154.
+- **V 계열:** 고정 blend, slice dropout, seed head 평균 V00–V04의 OOF 평가 완료. V02의 기록된 Public 점수는 0.805.
 - **U 계열:** 물리적 crop, IOP 방향 정규화, 평균 전 공간 attention, 전체 backbone 1/3 epoch, TTA와 앙상블. **코드와 자동 큐 준비 완료, GPU 학습 결과는 아직 없음.** [상세 계획](docs/public_method_experiments.md)
 
 ## 저장소 구성
@@ -72,14 +75,15 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-analysis.txt
 ```
 
-학습은 Kaggle GPU에서 진행한다. 대회 참가 및 데이터 접근 권한을 확보하고, 원하는 실험의 `train.ipynb`와 완료된 학습 출력에 연결한 `submit.ipynb`를 사용한다. **제출 notebook은 GPU ON / Internet OFF로 실행하며, 제출 대상은 `submission.csv`다.** Notebook metadata의 계정과 선행 output 버전은 실행할 계정에 맞게 설정해야 한다.
+기존 실험은 Kaggle GPU에서, 로컬 후속 파인튜닝은 RTX 5090에서 진행했다. 아래는 기존 Kaggle 재현 절차이며 대회 종료 후 공식 제출 가능 여부는 확인하지 않았다. 데이터 접근 권한을 확보하고, 원하는 실험의 `train.ipynb`와 완료된 학습 출력에 연결한 `submit.ipynb`를 사용한다. **제출 notebook은 GPU ON / Internet OFF로 실행하며, 제출 대상은 `submission.csv`다.** Notebook metadata의 계정과 선행 output 버전은 실행할 계정에 맞게 설정해야 한다.
 
 생성된 notebook에는 전체 코드와 실험 설정이 들어 있다. 다만 일부는 선행 실험 출력이나 보고서 약라벨 dataset을 입력으로 요구한다. `R/T/U` 자동 실행기는 작성자의 기존 실행 상태·선행 결과를 검증해 이어가는 용도이며, 공개 저장소를 clone하는 것만으로 기존 개인 Kaggle 출력에 접근하거나 모든 큐를 재개할 수 있는 것은 아니다. 데이터 준비와 입력 연결은 아래 문서를 참고한다.
 
-로컬 작업 폴더에서 전체 **90개 테스트가 통과**했다. 전체 suite 중 일부는 저장소에서 제외한 기존 학습 artifact를 요구한다. 해당 artifact가 준비된 환경의 검증 명령은 다음과 같다.
+2026-10-23 병합 전 검증에서 전체 **125개 중 CPU 121개 통과, GPU 전용 4개 건너뜀**을 확인했다. 별도 GPU 환경에서는 해당 4개를 포함한 관련 테스트 10개가 모두 통과했다. 전체 suite 중 일부는 저장소에서 제외한 기존 학습 artifact를 요구한다. 해당 artifact가 준비된 환경의 검증 명령은 다음과 같다.
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 -m unittest discover -s tests -v
+.\.venv-5090\Scripts\python.exe -X utf8 -m unittest tests.test_local_early_stopping tests.test_public_finetuning tests.test_public_finetuning_queue -v
 ```
 
 집계 자료로 혼동행렬 비교 화면을 다시 생성하려면:
@@ -92,6 +96,9 @@ HTML 비교 화면은 내려받아 브라우저에서 열 수 있다. GitHub에�
 
 ## 상세 실험 기록
 
+- [대회 종료 정리와 42개 구성 집계](docs/competition_wrapup_20261023.md)
+- [공개 파인튜닝 방법 7개 계열·점수 근거 조사](docs/kaggle_finetuning_evidence_20261023.md)
+- [RTX 5090 실행·early stopping·후속 학습 큐](docs/local_gpu_training.md)
 - [실험별 학습·제출 사용법과 전체 Notebook 목록](docs/experiment_notebooks.md)
 - [터미널 한 번으로 다음 실험 자동 실행](docs/automatic_experiments.md)
 - [실제 Kaggle 실행 결과와 모델 비교](docs/notebook_run_results.md)
@@ -123,6 +130,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_experiment
 
 GPU 학습 실행과 학습 버전 연결 명령은 위 사용법에 있다. API 토큰은 Notebook이나 저장소 파일에 넣지 않는다. 기존 `train_baseline.py`와 `notebooks/submission/`은 초기 baseline이며 새 실험과 별도로 보존한다.
 
-방향 × slice 깊이 positional encoding 실험은 [실험노트](docs/plane_depth_position_experiment.md)에 정리했다. T00 기존 구조 재현 → T01 깊이 추가 → T02 방향·깊이 결합을 비교한다. [자동 shell](scripts/run_plane_depth_experiments.ps1)은 기존 follow-up 큐 및 조건부 R07 완료 후 실행한다. [현재 대기/실행 기록](docs/plane_depth_execution_log.md).
+방향 × slice 깊이 positional encoding 실험은 [실험노트](docs/plane_depth_position_experiment.md)에 정리했다. T00 기존 구조 재현 → T01 깊이 추가 → T02 방향·깊이 결합을 비교했다. [과거 실행 기록](docs/plane_depth_execution_log.md)과 이후 완료된 [T00–T02 집계](docs/results/2026-10-23/experiment_metrics.csv)를 구분한다.
 
 공개 고득점 코드는 [Hotness·Most Votes 재조사 및 공식 점수 대조](docs/kaggle_hotness_votes_095_refresh.md)에서 확인할 수 있다. 상위 40개 목록, 기존 25개 검토의 공식 최고점, nartaa의 실제 학습 조건과 우리 구조의 차이를 정리했다.

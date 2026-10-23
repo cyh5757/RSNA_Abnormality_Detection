@@ -1,9 +1,10 @@
-"""Run the existing R06 recipe on a local CUDA GPU without changing Kaggle sources."""
+"""Run local R06 or validation-driven fine-tuning on a CUDA GPU."""
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -21,23 +22,31 @@ from experiments.weak_core import make_targets, validate_weak_bundle
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_FILES = [ROOT/'experiments'/name for name in (
     'core.py', 'backbones.py', 'train.py', 'weak_core.py', 'weak_train.py',
-    'spatial_core.py', 'spatial_train.py')] + [Path(__file__).resolve()]
+    'spatial_core.py', 'spatial_train.py', 'public_finetune.py')] + [Path(__file__).resolve()]
 
 
 def source_hashes():
     return {p.relative_to(ROOT).as_posix(): file_hash(p) for p in SOURCE_FILES}
 
 
-def local_config(parent):
+def local_config(parent, early_stopping=False, public_finetuning=False):
     if (parent.get('id') != 's11_cross' or parent.get('backbone') != 'swin_t'
             or parent.get('architecture') != 'spatial_v1'
             or parent.get('finetune') or parent.get('ensemble')):
         raise ValueError('Use the original frozen S11 training output.')
     digest = hashlib.sha256(json.dumps(source_hashes(), sort_keys=True).encode()).hexdigest()
-    return dict(parent, id='r06_local_warmup', comparison_parent='s12_finetune',
+    config = dict(parent, id='r06_local_warmup', comparison_parent='s12_finetune',
                 pipeline_sha256=digest, feature_pipeline_sha256=parent['pipeline_sha256'],
                 train_dependencies=['s11_cross'], center_range=[.25, .75],
                 head_warmup_epochs=1, backbone_epochs=1, finetune=True, ensemble=False)
+    if early_stopping or public_finetuning:
+        config.update(id='local_earlystop_p3', comparison_parent='r06_local_warmup',
+                      backbone_epochs=30, early_stopping_patience=3, backbone_timeout_hours=72.)
+    if public_finetuning:
+        config.update(id='local_public_full_cosine', comparison_parent='local_earlystop_p3',
+                      backbone_scope='full', backbone_schedule='warmup_cosine',
+                      gradient_checkpointing=True, keep_backbone_checkpoints=3)
+    return config
 
 
 def smoke_indices(gold, groups):
@@ -77,9 +86,9 @@ def check_images(table, series, image_root):
     return count
 
 
-def validate_inputs(data, labels, parent_run, mode):
+def validate_inputs(data, labels, parent_run, mode, early_stopping=False, public_finetuning=False):
     metadata = json.loads((parent_run/'bundle/assets.json').read_text(encoding='utf-8'))
-    config = local_config(metadata['experiment'])
+    config = local_config(metadata['experiment'], early_stopping, public_finetuning)
     validate_weak_bundle(parent_run/'bundle', metadata['experiment'])
     if file_hash(labels) != config['labels_sha256']:
         raise ValueError('Report label hash does not match the S11 training labels.')
@@ -125,7 +134,7 @@ def local_paths(labels, parent_run):
 @contextmanager
 def run_record(output, details):
     output.mkdir(parents=True, exist_ok=False)
-    record = dict(details, status='running', started_at=datetime.now(timezone.utc).isoformat())
+    record = dict(details, pid=os.getpid(), status='running', started_at=datetime.now(timezone.utc).isoformat())
     def save():
         temporary = output/'local_run.json.tmp'
         temporary.write_text(json.dumps(record, indent=2), encoding='utf-8')
@@ -141,6 +150,23 @@ def run_record(output, details):
     finally:
         record['finished_at'] = datetime.now(timezone.utc).isoformat()
         save()
+
+
+@contextmanager
+def early_stopping_session(enabled, lock_path=None):
+    if not enabled:
+        yield
+        return
+    from experiments.run_spatial_queue import exclusive_lock
+    with exclusive_lock(lock_path or ROOT/'outputs/local/r06-training.lock'):
+        import ctypes
+        if os.name == 'nt' and not ctypes.windll.kernel32.SetThreadExecutionState(0x80000001):
+            raise OSError('Could not prevent automatic sleep during training.')
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
 
 
 def smoke_train(inputs, data, parent_run, output):
@@ -170,7 +196,17 @@ def main(argv=None):
     parser.add_argument('--labels', type=Path, default=ROOT/'data/weak_labels/report_labels_v2.csv')
     parser.add_argument('--parent-run', type=Path, default=ROOT/'data/local-assets/s11/run')
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--early-stopping', action='store_true',
+                        help='Stop after 3 epochs without a lower weak validation BCE; cap at 30 epochs.')
+    parser.add_argument('--public-finetuning', action='store_true',
+                        help='Full encoder, 5 percent LR warmup/cosine, patience 3, retain top 3 checkpoints.')
+    parser.add_argument('--average-from', type=Path,
+                        help='Evaluate the top 3 weak-validation checkpoints from a completed public-method run.')
+    parser.add_argument('--training-lock', type=Path, help='Shared GPU lock for an isolated source snapshot.')
     args = parser.parse_args(argv)
+    if args.average_from and (not args.public_finetuning or args.mode != 'train'):
+        parser.error('--average-from requires --public-finetuning --mode train.')
+    args.early_stopping = args.early_stopping or args.public_finetuning
     data, labels, parent = (p.resolve() for p in (args.data_dir, args.labels, args.parent_run))
     report = dict(mode=args.mode, python=sys.version.split()[0], torch=torch.__version__,
                   cuda_build=torch.version.cuda, cuda_available=torch.cuda.is_available(), errors=[])
@@ -186,7 +222,7 @@ def main(argv=None):
         except RuntimeError as exc:
             report['errors'].append(f'CUDA forward/backward failed: {exc}')
     try:
-        inputs = validate_inputs(data, labels, parent, args.mode)
+        inputs = validate_inputs(data, labels, parent, args.mode, args.early_stopping, args.public_finetuning)
         report.update(training_studies=len(inputs['table']), selected_series=inputs['selected_series'])
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         report['errors'].append(str(exc))
@@ -195,18 +231,26 @@ def main(argv=None):
         return 1
     if args.mode == 'check':
         return 0
-    output = (args.output or ROOT/'outputs/local'/f'r06-rtx5090-{args.mode}').resolve()
+    prefix = 'earlystop-p3' if args.early_stopping else 'r06'
+    if args.public_finetuning: prefix = 'public-full-cosine-avg3' if args.average_from else 'public-full-cosine'
+    output = (args.output or ROOT/'outputs/local'/f'{prefix}-rtx5090-{args.mode}').resolve()
+    from experiments.public_finetune import average_backbone, use_averaged_backbone
+    averaged, average_audit = None, None
+    if args.average_from:
+        averaged, average_audit = average_backbone(args.average_from.resolve(), inputs['config'])
+        inputs['config'] = dict(inputs['config'], id='local_public_full_cosine_avg3',
+                                comparison_parent='local_public_full_cosine')
     receipt = dict(report, config=inputs['config'], source_hashes=source_hashes(),
                    data_dir=str(data), parent_run=str(parent),
                    input_hashes={str(p): file_hash(p) for p in
                                  (data/'train.csv', data/'train_series.csv', labels, parent/'bundle/assets.json')})
-    with run_record(output, receipt):
+    with early_stopping_session(args.early_stopping, args.training_lock), run_record(output, receipt):
         if args.mode == 'smoke':
             print(json.dumps(smoke_train(inputs, data, parent, output/'smoke'), indent=2))
         else:
             config = inputs['config']
             del inputs
-            with local_paths(labels, parent):
+            with local_paths(labels, parent), use_averaged_backbone(averaged, average_audit):
                 spatial_train.train_spatial_experiment(config, swin_t_encoder, data, output/'run')
             validate_weak_bundle(output/'run/bundle', config)
     print(f'Completed {args.mode}: {output}', flush=True)
